@@ -1,0 +1,60 @@
+# Base44 sandbox environment for the public-apis repository.
+#
+# This repo is a curated Markdown list (README.md) plus a Python validation
+# toolkit in `scripts/`. It has no application server of its own, so:
+#   * `web`      renders README.md as HTML on host port 3000 (the preview entry
+#                point) and serves the images it references.
+#   * `tools`    profile with the repo's own tooling as on-demand one-shot jobs:
+#                  docker compose -f docker-compose.base44.yml run --rm tests
+#                  docker compose -f docker-compose.base44.yml run --rm validate
+#
+# Every service runs from the bind-mounted checkout with the dependencies
+# installed on container startup, so repository edits apply without a rebuild.
+# No external credentials are involved (the link checker uses plain HTTP only).
+
+services:
+  web:
+    image: python:3.12-slim
+    working_dir: /app
+    command: ["sh", "-ec", "pip install --no-cache-dir --quiet markdown==3.7 && exec python .base44/preview/server.py"]
+    volumes:
+      - .:/app
+    environment:
+      - PORT=3000
+      - APP_DIR=/app
+      - PYTHONUNBUFFERED=1
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:3000/healthz', timeout=3).read()"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 45s
+    restart: on-failure
+    labels:
+      base44.project: public-apis
+      base44.kind: web
+      base44.port: "3000"
+
+  tests:
+    image: python:3.10-slim
+    working_dir: /app
+    profiles: ["tools"]
+    command: ["sh", "-ec", "pip install --no-cache-dir --quiet -r scripts/requirements.txt && cd scripts && python -m unittest discover tests/ --verbose"]
+    volumes:
+      - .:/app
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: "no"
+
+  validate:
+    image: python:3.10-slim
+    working_dir: /app
+    profiles: ["tools"]
+    command: ["sh", "-ec", "pip install --no-cache-dir --quiet -r scripts/requirements.txt && python scripts/validate/format.py README.md && python scripts/validate/links.py README.md --only_duplicate_links_checker"]
+    volumes:
+      - .:/app
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: "no"
